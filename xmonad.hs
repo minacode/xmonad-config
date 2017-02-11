@@ -20,19 +20,19 @@ data Lemonbar = Lemonbar {
   foreground      :: String,
   background      :: String,
   font            :: String,
-  underline_width :: Int,
-  underline_color :: String
+  underlineWidth :: Int,
+  underlineColor :: String
 } 
 
 instance Show Lemonbar where
   show Lemonbar {..} = unwords
     [ path
-    , "-g", (show width) ++ "x" ++ (show height) ++ "+" ++ (show x) ++ "+" ++ (show x)
-    , "-F", (show foreground)
-    , "-B", (show background)
-    , "-f-", (show font)
-    , "-u", (show underline_width)
-    , "-U", (show underline_color)
+    , "-g", show width ++ "x" ++ show height ++ "+" ++ show x ++ "+" ++ show y
+    , "-F", show foreground
+    , "-B", show background
+    , "-f-", show font
+    , "-u", show underlineWidth
+    , "-U", show underlineColor
     , "-p | bash"
     ]
 
