@@ -61,8 +61,8 @@ myLemonbar = show Lemonbar
   , foreground = "#99BF9C"
   , background = "#100B1C"
   , font       = "Liberation Mono:size=12"
-  , underline_width = 0
-  , underline_color = "#000000"
+  , underlineWidth = 0
+  , underlineColor = "#000000"
   }
 
 myModMask = mod4Mask
@@ -95,7 +95,7 @@ myLogHook h = dynamicLogWithPP $ defaultPP
 myExtraLoggers :: [Logger]
 myExtraLoggers = 
   [ logOffset 25 $ logCmd "iwgetid -r"
-  , logRight battery
+  , logOffset 25 $ battery
   , logCenter $ date "%a, %d.%m.%y, %T" 
   ]
 
@@ -103,6 +103,8 @@ left   = wrapIn "%{l}"
 center = wrapIn "%{c}"
 right  = wrapIn "%{r}"
 swapColors = wrapIn "%{R}"
+withCommand c = wrap ("%{A:" ++ c ++ ":}") "%{A}"
+
 offset :: Int -> String -> String
 offset o = wrap ("%{O" ++ show o ++ "}") "%{O}"
 
@@ -110,6 +112,7 @@ logLeft   = onLogger left
 logCenter = onLogger center
 logRight  = onLogger right
 logOffset o = onLogger $ offset o
+logCommand c = onLogger $ withCommand c
 
 myAudioVolume = logCmd "pactl ..."
 
