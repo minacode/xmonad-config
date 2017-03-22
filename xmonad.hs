@@ -10,6 +10,10 @@ import XMonad.Util.EZConfig
 import XMonad.Util.Run
 import XMonad.Util.Loggers
 import XMonad.Layout.NoBorders
+import XMonad.ManageHook
+import XMonad.Actions.SpawnOn
+
+-- Lemonbar ######################################################################
 
 data Lemonbar = Lemonbar {
   path            :: String,
@@ -33,28 +37,12 @@ instance Show Lemonbar where
     , "-f-", show font
     , "-u", show underlineWidth
     , "-U", show underlineColor
-    , "-p | bash"
+    , "-p"
     ]
 
-main = do
-  lemonbar <- spawnPipe myLemonbar
-  xmonad $ defaultConfig 
-    { modMask         = myModMask
-    , terminal        = myTerminal
-    , manageHook      = myManageHook
-    , layoutHook      = myLayoutHook
-    , handleEventHook = myHandleEventHook
-    , startupHook     = startupHook desktopConfig
-    , logHook         = myLogHook lemonbar
-    } `additionalKeysP`  
-    myKeysP
-
-
-myTerminal = "gnome-terminal"
-
-myLemonbar = show Lemonbar
+defaultLemonbar = show Lemonbar
   { path       = "/bin/lemonbar"
-  , width      = 1920
+  , width      = 1720
   , height     = 20
   , x          = 0
   , y          = 0
@@ -65,12 +53,62 @@ myLemonbar = show Lemonbar
   , underlineColor = "#000000"
   }
 
+-- Constants #########################################################################
+
 myModMask = mod4Mask
 
+myTerminal = "gnome-terminal"
+mySystray = "trayer --edge top --align right --widthtype pixel --width 200 --height 20 --SetDockType true --transparent true --alpha 0 --tint 0x100B1C"
+myFileManager = "nautilus"
+myBrowser = "chromium"
+myEmailClient = "thunderbird"
+myNetworkManager = "nm-applet"
+myCloud = "owncloud"
+myBackground = "feh --bg-scale /home/max/Pictures/Wallpapers/" ++ myBackgroundImage
+myRedshift = "redshift"
+
+myBackgroundImage = "1.jpg"
+myAudioSink = "alsa_output.pci-0000_00_1b.0.analog-stereo"
+myAudioDownRate = "-2%"
+myAudioUpRate = "+2%"
+
+myBacklightDec = show 3
+myBacklightInc = show 3
+
+-- main ###########################################################################
+
+main = do
+  lemonbar <- spawnPipe defaultLemonbar
+  xmonad $ defaultConfig 
+    { modMask         = myModMask
+    , terminal        = myTerminal
+    , manageHook      = manageSpawn <+> myManageHook
+    , layoutHook      = myLayoutHook
+    , handleEventHook = myHandleEventHook
+    , startupHook     = myStartupHook
+    , logHook         = myLogHook lemonbar
+    } `additionalKeysP`  myKeysP
+
+myKeysP = 
+  [ ("M-p", spawn "dmenu_run -fn 'Vera Sans Mono-11'")
+  , ("M-c", spawn myBrowser)
+  , ("M-n", spawn myFileManager)
+  , ("M-s", spawn $ "pactl set-sink-mute " ++ myAudioSink ++ " toggle")
+  , ("M-a", spawn $ "pactl set-sink-volume " ++ myAudioSink ++ " " ++ myAudioDownRate)
+  , ("M-d", spawn $ "pactl set-sink-volume " ++ myAudioSink ++ " " ++ myAudioUpRate)
+  , ("M-w", spawn $ "xbacklight -dec " ++ myBacklightDec)
+  , ("M-e", spawn $ "xbacklight -inc " ++ myBacklightInc)
+  ]
+
+-- Hooks #############################################################################
+
 myManageHook = 
-  manageDocks <+> 
-  (isFullscreen --> doFullFloat) <+> 
-  manageHook defaultConfig
+  composeAll
+  [ manageDocks
+  , (isFullscreen --> doFullFloat)
+  , resource =? "owncloud" --> doShift "9:owncloud"
+  , manageHook defaultConfig
+  ]
 
 myLayoutHook = avoidStruts $ smartBorders $ layoutHook defaultConfig
 
@@ -92,11 +130,22 @@ myLogHook h = dynamicLogWithPP $ defaultPP
   , ppSep     = " "
   }
 
+myStartupHook = do
+  startupHook desktopConfig
+  spawn mySystray
+  spawn myNetworkManager
+  spawn myBackground
+  spawn myRedshift
+  spawn myCloud
+  spawnOn "9" myEmailClient
+
+-- Logger ###########################################################################
+
 myExtraLoggers :: [Logger]
 myExtraLoggers = 
   [ logOffset 25 $ logCmd "iwgetid -r"
   , logOffset 25 $ battery
-  , logCenter $ date "%a, %d.%m.%y, %T" 
+  , logCenter . (logOffset 200) $ date "%a, %d.%m.%y, %T" 
   ]
 
 left   = wrapIn "%{l}"
@@ -113,23 +162,3 @@ logCenter = onLogger center
 logRight  = onLogger right
 logOffset o = onLogger $ offset o
 logCommand c = onLogger $ withCommand c
-
-myAudioVolume = logCmd "pactl ..."
-
-myKeysP = 
-  [ ("M-p", spawn "dmenu_run -fn 'Vera Sans Mono-11'")
-  , ("M-c", spawn "chromium")
-  , ("M-n", spawn "nautilus")
-  , ("M-s", spawn $ "pactl set-sink-mute " ++ myAudioSink ++ " toggle")
-  , ("M-a", spawn $ "pactl set-sink-volume " ++ myAudioSink ++ " " ++ myAudioDownRate)
-  , ("M-d", spawn $ "pactl set-sink-volume " ++ myAudioSink ++ " " ++ myAudioUpRate)
-  , ("M-w", spawn $ "xbacklight -dec " ++ myBacklightDec)
-  , ("M-e", spawn $ "xbacklight -inc " ++ myBacklightInc)
-  ]
-
-myAudioSink = "alsa_output.pci-0000_00_1b.0.analog-stereo"
-myAudioDownRate = "-2%"
-myAudioUpRate = "+2%"
-
-myBacklightDec = show 3
-myBacklightInc = show 3
