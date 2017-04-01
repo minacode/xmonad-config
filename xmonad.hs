@@ -12,6 +12,7 @@ import XMonad.Util.Loggers
 import XMonad.Layout.NoBorders
 import XMonad.ManageHook
 import XMonad.Actions.SpawnOn
+import Graphics.X11.ExtraTypes.XF86
 
 -- Lemonbar ######################################################################
 
@@ -66,6 +67,7 @@ myNetworkManager = "nm-applet"
 myCloud = "owncloud"
 myBackground = "feh --bg-scale /home/max/Pictures/Wallpapers/" ++ myBackgroundImage
 myRedshift = "redshift"
+myAudioControl = "volctl"
 
 myBackgroundImage = "1.jpg"
 myAudioSink = "alsa_output.pci-0000_00_1b.0.analog-stereo"
@@ -87,17 +89,21 @@ main = do
     , handleEventHook = myHandleEventHook
     , startupHook     = myStartupHook
     , logHook         = myLogHook lemonbar
-    } `additionalKeysP`  myKeysP
+    } `additionalKeysP`  myKeysP `additionalKeys` myKeys
+   
 
 myKeysP = 
   [ ("M-p", spawn "dmenu_run -fn 'Vera Sans Mono-11'")
   , ("M-c", spawn myBrowser)
   , ("M-n", spawn myFileManager)
-  , ("M-s", spawn $ "pactl set-sink-mute " ++ myAudioSink ++ " toggle")
-  , ("M-a", spawn $ "pactl set-sink-volume " ++ myAudioSink ++ " " ++ myAudioDownRate)
-  , ("M-d", spawn $ "pactl set-sink-volume " ++ myAudioSink ++ " " ++ myAudioUpRate)
-  , ("M-w", spawn $ "xbacklight -dec " ++ myBacklightDec)
-  , ("M-e", spawn $ "xbacklight -inc " ++ myBacklightInc)
+  ]
+
+myKeys = 
+  [ ((0, xF86XK_AudioLowerVolume), spawn $ unwords ["pactl", "set-sink-volume", myAudioSink, myAudioDownRate])
+  , ((0, xF86XK_AudioRaiseVolume), spawn $ unwords ["pactl", "set-sink-volume", myAudioSink, myAudioUpRate])
+  , ((0, xF86XK_AudioMute), spawn $ unwords ["pactl", "set-sink-mute", myAudioSink, "toggle"])
+  , ((0, xF86XK_MonBrightnessDown), spawn $ unwords ["xbacklight", "-dec", myBacklightDec])
+  , ((0, xF86XK_MonBrightnessUp), spawn $ unwords ["xbacklight", "-inc", myBacklightInc])
   ]
 
 -- Hooks #############################################################################
@@ -136,6 +142,7 @@ myStartupHook = do
   spawn myNetworkManager
   spawn myBackground
   spawn myRedshift
+  spawn myAudioControl
   spawn myCloud
   spawnOn "9" myEmailClient
 
