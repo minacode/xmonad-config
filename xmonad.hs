@@ -61,6 +61,7 @@ myModMask = mod4Mask
 myForegroundColor = "99BF9C"
 myBackgroundColor = "100B1C"
 
+myWorkspaces      = map show [1..9]
 myTerminal        = "gnome-terminal"
 mySystray         = unwords 
   [ "trayer"
@@ -74,41 +75,43 @@ mySystray         = unwords
   , "--alpha", show 0
   , "--tint", "0x" ++ myBackgroundColor
   ]
-myLauncher        = "dmenu_run -fn 'Vera Sans Mono-11'-b -l 5"
+myLauncher        = "dmenu_run -fn 'Vera Sans Mono-11'"
 myFileManager     = "nautilus"
 myBrowser         = "chromium"
 myEmailClient     = "thunderbird"
 myNetworkManager  = "nm-applet"
 myCloud           = "owncloud"
-myBackground      = "feh --bg-scale /home/max/Pictures/Wallpapers/" ++ myBackgroundImage
+myBackground      = unwords ["feh --bg-scale", myBackgroundImage]
 myRedshift        = "redshift"
 myAudioControl    = "volctl"
 myScreenLock      = "sflock"
+myBar             = show $ defaultLemonbar 
+  { foreground = '#' : myForegroundColor
+  , background = '#' : myBackgroundColor
+  }
 
-myBackgroundImage = "1.jpg"
+myBackgroundImage = "/home/max/Pictures/Wallpapers/1.jpg"
 
 myAudioSink       = "alsa_output.pci-0000_00_1b.0.analog-stereo"
 myAudioDownRate   = "-2%"
 myAudioUpRate     = "+2%"
-myAudioChangeCmd  = unwords ["pactl", "set-sink-volume"]
+myAudioChangeCmd  = "pactl set-sink-volume"
 myAudioDownCmd    = unwords [myAudioChangeCmd, myAudioSink, myAudioDownRate]
 myAudioUpCmd      = unwords [myAudioChangeCmd, myAudioSink, myAudioUpRate]
-myAudioMuteCmd    = unwords ["pactl", "set-sink-mute", myAudioSink, "toggle"]
+myAudioMuteCmd    = unwords ["pactl set-sink-mute", myAudioSink, "toggle"]
 
 myBacklightDec    = show 3
 myBacklightInc    = show 3
-myBacklightDecCmd = unwords ["xbacklight", "-dec", myBacklightDec]
-myBacklightIncCmd = unwords ["xbacklight", "-inc", myBacklightInc]
+myBacklightDecCmd = unwords ["xbacklight -dec", myBacklightDec]
+myBacklightIncCmd = unwords ["xbacklight -inc", myBacklightInc]
 
 -- main ###########################################################################
 
 main = do
-  lemonbar <- spawnPipe . show $ defaultLemonbar
-    { foreground = '#' : myForegroundColor
-    , background = '#' : myBackgroundColor
-    }
+  lemonbar <- spawnPipe myBar
   xmonad $ defaultConfig 
     { modMask         = myModMask
+    , workspaces      = myWorkspaces
     , terminal        = myTerminal
     , manageHook      = manageSpawn <+> myManageHook
     , layoutHook      = myLayoutHook
