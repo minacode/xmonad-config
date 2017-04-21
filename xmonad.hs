@@ -1,6 +1,7 @@
 {-#  LANGUAGE RecordWildCards #-}
 
 import XMonad
+import XMonad.StackSet hiding (workspaces)
 import XMonad.Hooks.ManageDocks
 import XMonad.Hooks.ManageHelpers
 import XMonad.Hooks.EwmhDesktops
@@ -10,9 +11,13 @@ import XMonad.Util.EZConfig
 import XMonad.Util.Run
 import XMonad.Util.Loggers
 import XMonad.Layout.NoBorders
+import XMonad.Layout.AvoidFloats
 import XMonad.ManageHook
 import XMonad.Actions.SpawnOn
+import XMonad.Actions.CycleWS
 import Graphics.X11.ExtraTypes.XF86
+import Data.Time.Clock
+import Data.Time.LocalTime
 
 -- Lemonbar ######################################################################
 
@@ -41,18 +46,19 @@ instance Show Lemonbar where
     , "-p"
     ]
 
-defaultLemonbar = Lemonbar
-  { path           = "/bin/lemonbar"
-  , width          = 1720
-  , height         = 20
-  , x              = 0
-  , y              = 0
-  , foreground     = "#99BF9C"
-  , background     = "#100B1C"
-  , font           = "Liberation Mono:size=12"
-  , underlineWidth = 0
-  , underlineColor = "#000000"
-  }
+instance Default Lemonbar where
+  def = Lemonbar
+    { path           = "/bin/lemonbar"
+    , width          = 1720
+    , height         = 20
+    , x              = 0
+    , y              = 0
+    , foreground     = "#99BF9C"
+    , background     = "#100B1C"
+    , font           = "Liberation Mono:size=12"
+    , underlineWidth = 0
+    , underlineColor = "#000000"
+    }
 
 -- Constants #########################################################################
 
@@ -75,17 +81,17 @@ mySystray         = unwords
   , "--alpha", show 0
   , "--tint", "0x" ++ myBackgroundColor
   ]
-myLauncher        = "dmenu_run -fn 'Vera Sans Mono-11'"
+myLauncher        = "dmenu_run -fn 'Liberation Mono-11'"
 myFileManager     = "nautilus"
 myBrowser         = "chromium"
 myEmailClient     = "thunderbird"
 myNetworkManager  = "nm-applet"
-myCloud           = "owncloud"
+myCloud           = "nextcloud"
 myBackground      = unwords ["feh --bg-scale", myBackgroundImage]
 myRedshift        = "redshift"
 myAudioControl    = "volctl"
 myScreenLock      = "sflock"
-myBar             = show $ defaultLemonbar 
+myBar             = show $ def 
   { foreground = '#' : myForegroundColor
   , background = '#' : myBackgroundColor
   }
@@ -105,54 +111,85 @@ myBacklightInc    = show 3
 myBacklightDecCmd = unwords ["xbacklight -dec", myBacklightDec]
 myBacklightIncCmd = unwords ["xbacklight -inc", myBacklightInc]
 
+myMediaPlayer     = "dbus-send --session --print-reply --dest=org.mpris.MediaPlayer2.vlc /org/mpris/MediaPlayer2"
+myMPCmd c       = unwords [myMediaPlayer, "org.mpris.MediaPlayer2.Player." ++ c]
+myMPPlay        = myMPCmd "Play"
+myMPPause       = myMPCmd "Pause"
+myMPPlayPause   = myMPCmd "PlayPause"
+myMPPrev        = myMPCmd "Previous"
+myMPNext        = myMPCmd "Next"
+
 -- main ###########################################################################
 
 main = do
-  lemonbar <- spawnPipe myBar
-  xmonad $ defaultConfig 
+  bar <- spawnPipe myBar
+  xmonad $ def 
     { modMask         = myModMask
     , workspaces      = myWorkspaces
     , terminal        = myTerminal
-    , manageHook      = manageSpawn <+> myManageHook
+    , manageHook      = myManageHook
     , layoutHook      = myLayoutHook
     , handleEventHook = myHandleEventHook
     , startupHook     = myStartupHook
-    , logHook         = myLogHook lemonbar
-    } `additionalKeysP` myKeysP `additionalKeys` myKeys
+    , logHook         = myLogHook bar
+    }
+    --`removeKeysP`     removedKeysP 
+    `additionalKeysP` myKeysP 
+    `additionalKeys`  myKeys
    
 
 myKeysP = 
   [ ("M-p", spawn myLauncher)
   , ("M-c", spawn myBrowser)
   , ("M-n", spawn myFileManager)
-  , ("M-l", spawn myScreenLock)
-  ]
+  , ("M1-<Tab>", nextWS)
+  , ("M1-S-<Tab>", prevWS)
+  , ("M-<Tab>", shiftToNext >> nextWS)
+  , ("M-S-<Tab>", shiftToPrev >> prevWS)
+  ] 
+  -- ++ [ ("M-" ++ i, goToWorkspace i) | i <- map show [1..9]]
 
 myKeys = 
-  [ ((0, xF86XK_AudioLowerVolume) , spawn myAudioDownCmd) 
-  , ((0, xF86XK_AudioRaiseVolume) , spawn myAudioUpCmd) 
+  [ ((0, xF86XK_AudioLowerVolume) , spawn myAudioDownCmd)
+  , ((0, xF86XK_AudioRaiseVolume) , spawn myAudioUpCmd)
   , ((0, xF86XK_AudioMute)        , spawn myAudioMuteCmd)
   , ((0, xF86XK_MonBrightnessDown), spawn myBacklightDecCmd)
   , ((0, xF86XK_MonBrightnessUp)  , spawn myBacklightIncCmd)
+  , ((0, xF86XK_AudioPrev)        , spawn myMPPrev)
+  , ((0, xF86XK_AudioNext)        , spawn myMPNext)
+  , ((0, xF86XK_AudioPlay)        , spawn myMPPlayPause)
   ]
+
+--removedKeysP = ["M-" ++ i | i <- map show [1..9]]
+
+-- Workspaces #######################################################################
+
+--goToWorkspace :: String -> X ()
+--goToWorkspace i = removeEmptyWorkspaceAfterExcept [i] $ addWorkspace i
 
 -- Hooks #############################################################################
 
 myManageHook = 
   composeAll
-    [ manageDocks
-    , (isFullscreen --> doFullFloat)
-    , manageHook defaultConfig
+    [ manageSpawn
+    , manageDocks
+    , isFullscreen --> doFullFloat
+    , appName =? myCloud --> unfloat
+    , manageHook def
     ]
 
-myLayoutHook = avoidStruts $ smartBorders $ layoutHook defaultConfig
+myLayoutHook = 
+  avoidStruts $ 
+  avoidFloats $ 
+  smartBorders $ 
+  layoutHook def
 
 myHandleEventHook = do
-  handleEventHook defaultConfig
+  handleEventHook def
   docksEventHook
   fullscreenEventHook
 
-myLogHook h = dynamicLogWithPP $ defaultPP
+myLogHook h = dynamicLogWithPP $ def
   { ppOutput          = hPutStrLn h
   , ppCurrent         = swapColors
   , ppHiddenNoWindows = id
@@ -177,10 +214,13 @@ myStartupHook = do
 
 myExtraLoggers :: [Logger]
 myExtraLoggers = 
-  [ logOffset 25 $ logCmd "iwgetid -r"
-  , logOffset 25 $ battery
-  , logCenter . (logOffset 200) $ date "%a, %d.%m.%y, %T" 
+  [ logOffset 25 battery
+  , logCenter . logOffset 200 $ date "%a, %d.%m.%y, %T" 
   ]
+
+-- Helper ###########################################################################
+
+unfloat = ask >>= doF . sink
 
 wrapIn s      = wrap s s
 left          = wrapIn "%{l}"
@@ -197,3 +237,9 @@ logCenter    = onLogger center
 logRight     = onLogger right
 logOffset o  = onLogger $ offset o
 logCommand c = onLogger $ withCommand c
+
+currentTime :: IO LocalTime
+currentTime = do
+  utcNow <- getCurrentTime
+  timezone <- getCurrentTimeZone
+  return $ utcToLocalTime timezone utcNow
