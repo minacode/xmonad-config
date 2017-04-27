@@ -1,15 +1,18 @@
 {-#  LANGUAGE RecordWildCards #-}
 
-import XMonad
+import XMonad hiding(currentTime)
 import XMonad.StackSet hiding (workspaces)
 import XMonad.Hooks.ManageDocks
 import XMonad.Hooks.ManageHelpers
 import XMonad.Hooks.EwmhDesktops
 import XMonad.Hooks.DynamicLog
+import XMonad.Hooks.Place
+import XMonad.Hooks.WallpaperSetter
 import XMonad.Config.Desktop
 import XMonad.Util.EZConfig
 import XMonad.Util.Run
 import XMonad.Util.Loggers
+import XMonad.Util.SpawnOnce
 import XMonad.Layout.NoBorders
 import XMonad.Layout.AvoidFloats
 import XMonad.ManageHook
@@ -18,6 +21,9 @@ import XMonad.Actions.CycleWS
 import Graphics.X11.ExtraTypes.XF86
 import Data.Time.Clock
 import Data.Time.LocalTime
+import System.IO
+import Sound.ALSA.Mixer
+import Control.Monad
 
 -- Lemonbar ######################################################################
 
@@ -50,7 +56,7 @@ instance Default Lemonbar where
   def = Lemonbar
     { path           = "/bin/lemonbar"
     , width          = 1720
-    , height         = 20
+    , height         = 22
     , x              = 0
     , y              = 0
     , foreground     = "#99BF9C"
@@ -59,6 +65,60 @@ instance Default Lemonbar where
     , underlineWidth = 0
     , underlineColor = "#000000"
     }
+
+-- Wallpaper #########################################################################
+
+myWallpaperPath  = "/home/max/Pictures/Wallpapers/"
+myDayWallpaper   = "1.jpg"
+myNightWallpaper = "5.jpg"
+
+myWallpaper = do
+  time <- currentTime
+  return $ getWallpaperImage time
+
+getWallpaperImage time 
+  | isNight time = WallpaperFix myNightWallpaper
+  | otherwise    = WallpaperFix myDayWallpaper
+
+setWallpaper = do
+  wp <- liftIO myWallpaper
+  let wplist = WallpaperList $ zip myWorkspaces $ repeat wp
+      conf   = WallpaperConf myWallpaperPath wplist
+  wallpaperSetter conf
+
+-- ALSA ##############################################################################
+
+myMixer        = "default"
+myAudioChannel = "Master"
+myVolumeUp     = 2
+myVolumeDown   = -myVolumeUp
+
+incVolume, decVolume, muteVolume :: X ()
+incVolume  = liftIO $ changeVolume myVolumeUp
+decVolume  = liftIO $ changeVolume myVolumeDown
+muteVolume = liftIO toggleMute
+
+changeVolume :: Integer -> IO ()
+changeVolume v = withMixer myMixer $ changeMixerVolume v
+
+toggleMute :: IO ()
+toggleMute = withMixer myMixer toggleMixerMute
+
+changeMixerVolume :: Integer -> Mixer -> IO ()
+changeMixerVolume a mixer = do
+  Just control <- getControlByName mixer myAudioChannel
+  let Just playbackVolume = playback $ volume control
+  (min, max) <- getRange playbackVolume
+  Just vol <- getChannel FrontLeft $ value playbackVolume
+  when ((a > 0 && vol < max) || (a < 0 && vol > min))
+    $ setChannel FrontCenter (value playbackVolume) $ vol + a
+
+toggleMixerMute :: Mixer -> IO ()
+toggleMixerMute mixer = do
+  Just control <- getControlByName mixer myAudioChannel
+  let Just playbackSwitch = playback $ switch control
+  Just sw <- getChannel FrontLeft playbackSwitch
+  setChannel FrontCenter playbackSwitch $ not sw
 
 -- Constants #########################################################################
 
@@ -75,36 +135,26 @@ mySystray         = unwords
   , "--align", "right"
   , "--widthtype", "pixel"
   , "--width", show 200
-  , "--height", show 20
+  , "--height", show 22
   , "--SetDockType", "true"
   , "--transparent", "true"
   , "--alpha", show 0
   , "--tint", "0x" ++ myBackgroundColor
   ]
-myLauncher        = "dmenu_run -fn 'Liberation Mono-11'"
+myLauncher        = "xfce4-appfinder"
+--myLauncher        = "dmenu_run -fn 'Liberation Mono-11'"
 myFileManager     = "nautilus"
 myBrowser         = "chromium"
 myEmailClient     = "thunderbird"
 myNetworkManager  = "nm-applet"
 myCloud           = "nextcloud"
-myBackground      = unwords ["feh --bg-scale", myBackgroundImage]
 myRedshift        = "redshift"
-myAudioControl    = "volctl"
+myAudioControl    = "alsa-tray"
 myScreenLock      = "sflock"
 myBar             = show $ def 
   { foreground = '#' : myForegroundColor
   , background = '#' : myBackgroundColor
   }
-
-myBackgroundImage = "/home/max/Pictures/Wallpapers/1.jpg"
-
-myAudioSink       = "alsa_output.pci-0000_00_1b.0.analog-stereo"
-myAudioDownRate   = "-2%"
-myAudioUpRate     = "+2%"
-myAudioChangeCmd  = "pactl set-sink-volume"
-myAudioDownCmd    = unwords [myAudioChangeCmd, myAudioSink, myAudioDownRate]
-myAudioUpCmd      = unwords [myAudioChangeCmd, myAudioSink, myAudioUpRate]
-myAudioMuteCmd    = unwords ["pactl set-sink-mute", myAudioSink, "toggle"]
 
 myBacklightDec    = show 3
 myBacklightInc    = show 3
@@ -150,9 +200,9 @@ myKeysP =
   -- ++ [ ("M-" ++ i, goToWorkspace i) | i <- map show [1..9]]
 
 myKeys = 
-  [ ((0, xF86XK_AudioLowerVolume) , spawn myAudioDownCmd)
-  , ((0, xF86XK_AudioRaiseVolume) , spawn myAudioUpCmd)
-  , ((0, xF86XK_AudioMute)        , spawn myAudioMuteCmd)
+  [ ((0, xF86XK_AudioLowerVolume) , decVolume)
+  , ((0, xF86XK_AudioRaiseVolume) , incVolume)
+  , ((0, xF86XK_AudioMute)        , muteVolume)
   , ((0, xF86XK_MonBrightnessDown), spawn myBacklightDecCmd)
   , ((0, xF86XK_MonBrightnessUp)  , spawn myBacklightIncCmd)
   , ((0, xF86XK_AudioPrev)        , spawn myMPPrev)
@@ -173,10 +223,15 @@ myManageHook =
   composeAll
     [ manageSpawn
     , manageDocks
+    , appName =? myAudioControl --> placeHook myPlacement
     , isFullscreen --> doFullFloat
     , appName =? myCloud --> unfloat
+    , appName =? myAudioControl --> doFloat
     , manageHook def
     ]
+
+-- does not work as expected
+myPlacement = inBounds $ underMouse (0,0)
 
 myLayoutHook = 
   avoidStruts $ 
@@ -189,22 +244,23 @@ myHandleEventHook = do
   docksEventHook
   fullscreenEventHook
 
-myLogHook h = dynamicLogWithPP $ def
-  { ppOutput          = hPutStrLn h
-  , ppCurrent         = swapColors
-  , ppHiddenNoWindows = id
-  , ppTitle           = const ""
-  , ppLayout          = const ""
-  , ppUrgent          = id
-  , ppExtras          = myExtraLoggers
-  , ppSep             = " "
-  }
+myLogHook h = do
+  dynamicLogWithPP $ def
+    { ppOutput          = hPutStrLn h
+    , ppCurrent         = swapColors
+    , ppHiddenNoWindows = id
+    , ppTitle           = const ""
+    , ppLayout          = const ""
+    , ppUrgent          = id
+    , ppExtras          = myExtraLoggers
+    , ppSep             = " "
+    }
+  setWallpaper
 
 myStartupHook = do
   startupHook desktopConfig
   spawn mySystray
   spawn myNetworkManager
-  spawn myBackground
   spawn myRedshift
   spawn myAudioControl
   spawn myCloud
@@ -238,8 +294,16 @@ logRight     = onLogger right
 logOffset o  = onLogger $ offset o
 logCommand c = onLogger $ withCommand c
 
-currentTime :: IO LocalTime
 currentTime = do
   utcNow <- getCurrentTime
   timezone <- getCurrentTimeZone
-  return $ utcToLocalTime timezone utcNow
+  return . localTimeOfDay $ utcToLocalTime timezone utcNow
+
+isNight :: TimeOfDay -> Bool
+isNight time = TimeOfDay 20 0 0 <= time || time <= TimeOfDay 6 0 0 
+
+myLog :: Show a => a -> IO ()
+myLog l = do
+  f <- openFile "/home/max/xmonadlog" AppendMode
+  hPrint f l
+  hClose f
