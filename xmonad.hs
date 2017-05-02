@@ -1,31 +1,46 @@
 {-#  LANGUAGE RecordWildCards #-}
 
-import XMonad hiding(currentTime)
+import XMonad hiding (currentTime)
 import XMonad.StackSet hiding (workspaces)
-import XMonad.Hooks.ManageDocks
+import XMonad.Hooks.ManageDocks 
+  (avoidStruts, manageDocks, docksEventHook)
 import XMonad.Hooks.ManageHelpers
+  (isFullscreen, doFullFloat)
 import XMonad.Hooks.EwmhDesktops
+  (fullscreenEventHook)
 import XMonad.Hooks.DynamicLog
+  ( ppOutput, ppCurrent, ppHiddenNoWindows, ppTitle
+  , ppLayout, ppUrgent, ppExtras, ppSep
+  , dynamicLogWithPP, wrap
+  ) 
 import XMonad.Hooks.Place
+  (placeHook, inBounds, underMouse)
 import XMonad.Hooks.WallpaperSetter
+  (wallpaperSetter, Wallpaper(..), WallpaperList(..), WallpaperConf(..))
 import XMonad.Config.Desktop
+  (desktopConfig)
 import XMonad.Util.EZConfig
+  (additionalKeys, additionalKeysP)
 import XMonad.Util.Run
+  (spawnPipe)
 import XMonad.Util.Loggers
-import XMonad.Util.SpawnOnce
-import XMonad.Layout.NoBorders
+  (Logger, battery, date, onLogger)
+import XMonad.Layout.NoBorders 
+  (smartBorders)
 import XMonad.Layout.AvoidFloats
-import XMonad.ManageHook
-import XMonad.Actions.SpawnOn
+  (avoidFloats)
 import XMonad.Actions.CycleWS
+  (nextWS, prevWS, shiftToNext, shiftToPrev, shiftTo, WSType(..), Direction1D(..))
 import Graphics.X11.ExtraTypes.XF86
 import Data.Time.Clock
+  (getCurrentTime)
 import Data.Time.LocalTime
+  (getCurrentTimeZone, TimeOfDay(..), utcToLocalTime, localTimeOfDay)
 import System.IO
-import Sound.ALSA.Mixer
-import Control.Monad
+  (hPrint, hPutStrLn, hClose, openFile, IOMode(..))
+--import Control.Monad
 
--- Lemonbar ######################################################################
+-- Lemonbar ##########################################################################
 
 data Lemonbar = Lemonbar {
   path            :: String,
@@ -81,46 +96,21 @@ getWallpaperImage time
   | otherwise    = WallpaperFix myDayWallpaper
 
 setWallpaper = do
-  wp <- liftIO myWallpaper
+  wp <- io myWallpaper
   let wplist = WallpaperList $ zip myWorkspaces $ repeat wp
       conf   = WallpaperConf myWallpaperPath wplist
   wallpaperSetter conf
 
--- ALSA ##############################################################################
+-- ALSA #############################################################################
 
-myMixer        = "default"
-myAudioChannel = "Master"
 myVolumeUp     = 2
-myVolumeDown   = -myVolumeUp
+myVolumeDown   = myVolumeUp
 
-incVolume, decVolume, muteVolume :: X ()
-incVolume  = liftIO $ changeVolume myVolumeUp
-decVolume  = liftIO $ changeVolume myVolumeDown
-muteVolume = liftIO toggleMute
+incVolume  = spawn $ unwords [myAudioControl, '+' : show myVolumeUp]
+decVolume  = spawn $ unwords [myAudioControl, '-' : show myVolumeDown]
+muteVolume = spawn $ unwords [myAudioControl, "mute"]  
 
-changeVolume :: Integer -> IO ()
-changeVolume v = withMixer myMixer $ changeMixerVolume v
-
-toggleMute :: IO ()
-toggleMute = withMixer myMixer toggleMixerMute
-
-changeMixerVolume :: Integer -> Mixer -> IO ()
-changeMixerVolume a mixer = do
-  Just control <- getControlByName mixer myAudioChannel
-  let Just playbackVolume = playback $ volume control
-  (min, max) <- getRange playbackVolume
-  Just vol <- getChannel FrontLeft $ value playbackVolume
-  when ((a > 0 && vol < max) || (a < 0 && vol > min))
-    $ setChannel FrontCenter (value playbackVolume) $ vol + a
-
-toggleMixerMute :: Mixer -> IO ()
-toggleMixerMute mixer = do
-  Just control <- getControlByName mixer myAudioChannel
-  let Just playbackSwitch = playback $ switch control
-  Just sw <- getChannel FrontLeft playbackSwitch
-  setChannel FrontCenter playbackSwitch $ not sw
-
--- Constants #########################################################################
+-- Constants ########################################################################
 
 myModMask = mod4Mask
 
@@ -183,7 +173,6 @@ main = do
     , startupHook     = myStartupHook
     , logHook         = myLogHook bar
     }
-    --`removeKeysP`     removedKeysP 
     `additionalKeysP` myKeysP 
     `additionalKeys`  myKeys
    
@@ -196,8 +185,8 @@ myKeysP =
   , ("M1-S-<Tab>", prevWS)
   , ("M-<Tab>", shiftToNext >> nextWS)
   , ("M-S-<Tab>", shiftToPrev >> prevWS)
+  , ("M-w", shiftTo Next EmptyWS) 
   ] 
-  -- ++ [ ("M-" ++ i, goToWorkspace i) | i <- map show [1..9]]
 
 myKeys = 
   [ ((0, xF86XK_AudioLowerVolume) , decVolume)
@@ -210,22 +199,17 @@ myKeys =
   , ((0, xF86XK_AudioPlay)        , spawn myMPPlayPause)
   ]
 
---removedKeysP = ["M-" ++ i | i <- map show [1..9]]
-
--- Workspaces #######################################################################
-
---goToWorkspace :: String -> X ()
---goToWorkspace i = removeEmptyWorkspaceAfterExcept [i] $ addWorkspace i
-
 -- Hooks #############################################################################
 
 myManageHook = 
   composeAll
-    [ manageSpawn
-    , manageDocks
+    [ manageDocks
     , appName =? myAudioControl --> placeHook myPlacement
     , isFullscreen --> doFullFloat
-    , appName =? myCloud --> unfloat
+    ,      appName =? myCloud 
+      <||> appName =? myBrowser
+      <||> appName =? myFileManager
+      -->  unfloat
     , appName =? myAudioControl --> doFloat
     , manageHook def
     ]
@@ -263,8 +247,8 @@ myStartupHook = do
   spawn myNetworkManager
   spawn myRedshift
   spawn myAudioControl
-  spawn myCloud
-  spawnOn "9" myEmailClient
+  --spawn myCloud
+  --spawnOn "9" myEmailClient
 
 -- Logger ###########################################################################
 
@@ -273,6 +257,7 @@ myExtraLoggers =
   [ logOffset 25 battery
   , logCenter . logOffset 200 $ date "%a, %d.%m.%y, %T" 
   ]
+
 
 -- Helper ###########################################################################
 
