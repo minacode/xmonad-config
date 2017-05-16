@@ -3,11 +3,11 @@
 import XMonad hiding (currentTime)
 import XMonad.StackSet hiding (workspaces)
 import XMonad.Hooks.ManageDocks 
-  (avoidStruts, manageDocks, docksEventHook)
+  (docks, avoidStruts)
 import XMonad.Hooks.ManageHelpers
   (isFullscreen, doFullFloat)
 import XMonad.Hooks.EwmhDesktops
-  (fullscreenEventHook)
+  (ewmh, fullscreenEventHook)
 import XMonad.Hooks.DynamicLog
   ( ppOutput, ppCurrent, ppHiddenNoWindows, ppTitle
   , ppLayout, ppUrgent, ppExtras, ppSep
@@ -38,48 +38,6 @@ import Data.Time.LocalTime
   (getCurrentTimeZone, TimeOfDay(..), utcToLocalTime, localTimeOfDay)
 import System.IO
   (hPrint, hPutStrLn, hClose, openFile, IOMode(..))
---import Control.Monad
-
--- Lemonbar ##########################################################################
-
-data Lemonbar = Lemonbar {
-  path            :: String,
-  width           :: Int,
-  height          :: Int,
-  x               :: Int,
-  y               :: Int,
-  foreground      :: String,
-  background      :: String,
-  font            :: String,
-  underlineWidth  :: Int,
-  underlineColor  :: String
-} 
-
-instance Show Lemonbar where
-  show Lemonbar {..} = unwords
-    [ path
-    , "-g",  show width ++ "x" ++ show height ++ "+" ++ show x ++ "+" ++ show y
-    , "-F",  show foreground
-    , "-B",  show background
-    , "-f-", show font
-    , "-u",  show underlineWidth
-    , "-U",  show underlineColor
-    , "-p"
-    ]
-
-instance Default Lemonbar where
-  def = Lemonbar
-    { path           = "/bin/lemonbar"
-    , width          = 1720
-    , height         = 22
-    , x              = 0
-    , y              = 0
-    , foreground     = "#99BF9C"
-    , background     = "#100B1C"
-    , font           = "Liberation Mono:size=12"
-    , underlineWidth = 0
-    , underlineColor = "#000000"
-    }
 
 -- Wallpaper #########################################################################
 
@@ -132,13 +90,12 @@ mySystray         = unwords
   , "--tint", "0x" ++ myBackgroundColor
   ]
 myLauncher        = "xfce4-appfinder"
---myLauncher        = "dmenu_run -fn 'Liberation Mono-11'"
 myFileManager     = "nautilus"
 myBrowser         = "chromium"
 myEmailClient     = "thunderbird"
 myNetworkManager  = "nm-applet"
 myCloud           = "nextcloud"
-myRedshift        = "redshift"
+myRedshift        = "redshift-gtk"
 myAudioControl    = "alsa-tray"
 myScreenLock      = "sflock"
 myBar             = show $ def 
@@ -159,11 +116,13 @@ myMPPlayPause   = myMPCmd "PlayPause"
 myMPPrev        = myMPCmd "Previous"
 myMPNext        = myMPCmd "Next"
 
+mySunrise = TimeOfDay 6 0 0
+mySunset  = TimeOfDay 21 0 0
+
 -- main ###########################################################################
 
 main = do
-  bar <- spawnPipe myBar
-  xmonad $ def 
+  xmonad $ docks $ ewmh def 
     { modMask         = myModMask
     , workspaces      = myWorkspaces
     , terminal        = myTerminal
@@ -171,12 +130,11 @@ main = do
     , layoutHook      = myLayoutHook
     , handleEventHook = myHandleEventHook
     , startupHook     = myStartupHook
-    , logHook         = myLogHook bar
+    , logHook         = myLogHook
     }
     `additionalKeysP` myKeysP 
     `additionalKeys`  myKeys
-   
-
+  
 myKeysP = 
   [ ("M-p", spawn myLauncher)
   , ("M-c", spawn myBrowser)
@@ -203,10 +161,10 @@ myKeys =
 
 myManageHook = 
   composeAll
-    [ manageDocks
-    , appName =? myAudioControl --> placeHook myPlacement
+    [ appName =? myAudioControl --> placeHook myPlacement
     , isFullscreen --> doFullFloat
     ,      appName =? myCloud 
+      <||> appName =? "owncloud"
       <||> appName =? myBrowser
       <||> appName =? myFileManager
       -->  unfloat
@@ -218,74 +176,43 @@ myManageHook =
 myPlacement = inBounds $ underMouse (0,0)
 
 myLayoutHook = 
-  avoidStruts $ 
+  avoidStruts $
   avoidFloats $ 
   smartBorders $ 
   layoutHook def
 
 myHandleEventHook = do
   handleEventHook def
-  docksEventHook
   fullscreenEventHook
 
-myLogHook h = do
-  dynamicLogWithPP $ def
-    { ppOutput          = hPutStrLn h
-    , ppCurrent         = swapColors
-    , ppHiddenNoWindows = id
-    , ppTitle           = const ""
-    , ppLayout          = const ""
-    , ppUrgent          = id
-    , ppExtras          = myExtraLoggers
-    , ppSep             = " "
-    }
-  setWallpaper
+myLogHook = setWallpaper
 
 myStartupHook = do
   startupHook desktopConfig
-  spawn mySystray
   spawn myNetworkManager
   spawn myRedshift
-  spawn myAudioControl
-  --spawn myCloud
-  --spawnOn "9" myEmailClient
-
--- Logger ###########################################################################
-
-myExtraLoggers :: [Logger]
-myExtraLoggers = 
-  [ logOffset 25 battery
-  , logCenter . logOffset 200 $ date "%a, %d.%m.%y, %T" 
-  ]
-
+  --spawn myAudioControl
+  spawn "tint2"
 
 -- Helper ###########################################################################
 
 unfloat = ask >>= doF . sink
-
-wrapIn s      = wrap s s
-left          = wrapIn "%{l}"
-center        = wrapIn "%{c}"
-right         = wrapIn "%{r}"
-swapColors    = wrapIn "%{R}"
-withCommand c = wrap ("%{A:" ++ c ++ ":}") "%{A}"
-
-offset :: Int -> String -> String
-offset o = wrap ("%{O" ++ show o ++ "}") "%{O}"
-
-logLeft      = onLogger left
-logCenter    = onLogger center
-logRight     = onLogger right
-logOffset o  = onLogger $ offset o
-logCommand c = onLogger $ withCommand c
 
 currentTime = do
   utcNow <- getCurrentTime
   timezone <- getCurrentTimeZone
   return . localTimeOfDay $ utcToLocalTime timezone utcNow
 
+between :: Ord a => a -> (a, a) -> Bool
+between a (b, c) = (b <= a) &| (a <= c)
+  where 
+    (&|) :: Bool -> Bool -> Bool
+    (&|) 
+      | b <= c = (&&)
+      | otherwise = (||) 
+
 isNight :: TimeOfDay -> Bool
-isNight time = TimeOfDay 20 0 0 <= time || time <= TimeOfDay 6 0 0 
+isNight time = time `between` (mySunset, mySunrise) 
 
 myLog :: Show a => a -> IO ()
 myLog l = do
