@@ -1,7 +1,10 @@
 {-#  LANGUAGE RecordWildCards #-}
 
+import qualified Data.Map as M
+import qualified Data.Text as T
+
 import XMonad hiding (currentTime)
-import XMonad.StackSet hiding (workspaces)
+import XMonad.StackSet hiding (workspaces, float)
 import XMonad.Hooks.ManageDocks 
   (docks, avoidStruts)
 import XMonad.Hooks.ManageHelpers
@@ -11,8 +14,7 @@ import XMonad.Hooks.EwmhDesktops
 import XMonad.Hooks.DynamicLog
   ( ppOutput, ppCurrent, ppHiddenNoWindows, ppTitle
   , ppLayout, ppUrgent, ppExtras, ppSep
-  , dynamicLogWithPP, wrap
-  ) 
+  , dynamicLogWithPP, wrap) 
 import XMonad.Hooks.Place
   (placeHook, inBounds, underMouse)
 import XMonad.Hooks.WallpaperSetter
@@ -20,23 +22,29 @@ import XMonad.Hooks.WallpaperSetter
 import XMonad.Config.Desktop
   (desktopConfig)
 import XMonad.Util.EZConfig
-  (additionalKeys, additionalKeysP)
-import XMonad.Util.Run
+  (additionalKeys, additionalKeysP, additionalMouseBindings)
+import XMonad.Util.Run 
   (spawnPipe)
-import XMonad.Util.Loggers
-  (Logger, battery, date, onLogger)
 import XMonad.Layout.NoBorders 
   (smartBorders)
 import XMonad.Layout.AvoidFloats
   (avoidFloats)
 import XMonad.Actions.CycleWS
   (nextWS, prevWS, shiftToNext, shiftToPrev, shiftTo, WSType(..), Direction1D(..))
+import XMonad.Actions.MouseGestures
+import XMonad.Actions.Plane
+import XMonad.Actions.WindowBringer
+import XMonad.Actions.WindowGo
+import XMonad.Actions.WindowMenu
+import XMonad.Hooks.ScreenCorners
+import XMonad.Layout.MouseResizableTile
+import XMonad.Util.NamedWindows (getName)
 import Graphics.X11.ExtraTypes.XF86
 import Data.Time.Clock
-  (getCurrentTime)
 import Data.Time.LocalTime
-  (getCurrentTimeZone, TimeOfDay(..), utcToLocalTime, localTimeOfDay)
-import System.IO
+import Data.Time.Horizon
+import Data.Time.Calendar
+import System.IO 
   (hPrint, hPutStrLn, hClose, openFile, IOMode(..))
 
 -- Wallpaper #########################################################################
@@ -46,12 +54,14 @@ myDayWallpaper   = "1.jpg"
 myNightWallpaper = "5.jpg"
 
 myWallpaper = do
-  time <- currentTime
-  return $ getWallpaperImage time
+  time <- getCurrentTime
+  let day = utctDay time
+  return $ getWallpaperImage time day
 
-getWallpaperImage time 
-  | isNight time = WallpaperFix myNightWallpaper
-  | otherwise    = WallpaperFix myDayWallpaper
+getWallpaperImage :: UTCTime -> Day -> Wallpaper
+getWallpaperImage time day 
+  | isNight time day myLongitudeWest myLatitudeNorth = WallpaperFix myNightWallpaper
+  | otherwise                                        = WallpaperFix myDayWallpaper
 
 setWallpaper = do
   wp <- io myWallpaper
@@ -59,14 +69,19 @@ setWallpaper = do
       conf   = WallpaperConf myWallpaperPath wplist
   wallpaperSetter conf
 
--- ALSA #############################################################################
+-- Volume #############################################################################
 
-myVolumeUp     = 2
-myVolumeDown   = myVolumeUp
+myVolumeChange = "2%"
+myVolumeUp     = '+' : myVolumeChange
+myVolumeDown   = '-' : myVolumeChange
 
-incVolume  = spawn $ unwords [myAudioControl, '+' : show myVolumeUp]
-decVolume  = spawn $ unwords [myAudioControl, '-' : show myVolumeDown]
-muteVolume = spawn $ unwords [myAudioControl, "mute"]  
+myPASink = "alsa_output.pci-0000_00_1b.0.analog-stereo"
+myVolumeSetter = unwords ["pactl", "set-sink-volume"]
+myMuteSetter = unwords ["pactl", "set-sink-mute"]
+
+incVolume  = spawn $ unwords [myVolumeSetter, myPASink, myVolumeUp]
+decVolume  = spawn $ unwords [myVolumeSetter, myPASink, myVolumeDown]
+muteVolume = spawn $ unwords [myMuteSetter, myPASink, "toggle"]  
 
 -- Constants ########################################################################
 
@@ -77,31 +92,17 @@ myBackgroundColor = "100B1C"
 
 myWorkspaces      = map show [1..9]
 myTerminal        = "gnome-terminal"
-mySystray         = unwords 
-  [ "trayer"
-  , "--edge", "top"
-  , "--align", "right"
-  , "--widthtype", "pixel"
-  , "--width", show 200
-  , "--height", show 22
-  , "--SetDockType", "true"
-  , "--transparent", "true"
-  , "--alpha", show 0
-  , "--tint", "0x" ++ myBackgroundColor
-  ]
 myLauncher        = "xfce4-appfinder"
+myBar             = "tint2"
 myFileManager     = "nautilus"
 myBrowser         = "chromium"
 myEmailClient     = "thunderbird"
 myNetworkManager  = "nm-applet"
 myCloud           = "nextcloud"
 myRedshift        = "redshift-gtk"
-myAudioControl    = "alsa-tray"
+myAudioControl    = "volctl"
 myScreenLock      = "sflock"
-myBar             = show $ def 
-  { foreground = '#' : myForegroundColor
-  , background = '#' : myBackgroundColor
-  }
+myScreenshotCmd   = "import -window root screenshot.jpg"
 
 myBacklightDec    = show 3
 myBacklightInc    = show 3
@@ -116,13 +117,25 @@ myMPPlayPause   = myMPCmd "PlayPause"
 myMPPrev        = myMPCmd "Previous"
 myMPNext        = myMPCmd "Next"
 
-mySunrise = TimeOfDay 6 0 0
-mySunset  = TimeOfDay 21 0 0
+myWindowBringerConfig :: WindowBringerConfig
+myWindowBringerConfig = def
+  { menuArgs = ["-i", "-l", "20", "-b"]
+  , windowTitler = myWindowBringerTitler
+  }
+myWindowBringerColumnSize = 50
+
+--mySunrise = TimeOfDay 6 0 0
+--mySunset  = TimeOfDay 21 0 0
+
+myLongitudeWest = 13.737262
+myLatitudeNorth = 51.050407
 
 -- main ###########################################################################
 
-main = do
-  xmonad $ docks $ ewmh def 
+main =  
+  xmonad $ 
+  docks $ 
+  ewmh def
     { modMask         = myModMask
     , workspaces      = myWorkspaces
     , terminal        = myTerminal
@@ -134,16 +147,23 @@ main = do
     }
     `additionalKeysP` myKeysP 
     `additionalKeys`  myKeys
-  
+    `additionalMouseBindings` myMouseBindings
+ 
+-- Controls #######################################################################
+ 
 myKeysP = 
   [ ("M-p", spawn myLauncher)
   , ("M-c", spawn myBrowser)
   , ("M-n", spawn myFileManager)
+  , ("M-m", spawn myArmyListTool)
+  , ("M-i", spawn myScreenshotCmd)
+  , ("M-o", gotoMenuConfig myWindowBringerConfig)
+  , ("M-S-o", bringMenuConfig myWindowBringerConfig)
   , ("M1-<Tab>", nextWS)
-  , ("M1-S-<Tab>", prevWS)
-  , ("M-<Tab>", shiftToNext >> nextWS)
+  , ("M1-S-<Tab>", shiftToNext >> nextWS)
+  , ("M-<Tab>", prevWS)
   , ("M-S-<Tab>", shiftToPrev >> prevWS)
-  , ("M-w", shiftTo Next EmptyWS) 
+  , ("M-w", shiftTo Next EmptyWS)
   ] 
 
 myKeys = 
@@ -155,6 +175,22 @@ myKeys =
   , ((0, xF86XK_AudioPrev)        , spawn myMPPrev)
   , ((0, xF86XK_AudioNext)        , spawn myMPNext)
   , ((0, xF86XK_AudioPlay)        , spawn myMPPlayPause)
+  ]
+  ++ M.toList (planeKeys myModMask (Lines 1) Linear)
+
+myMouseBindings =
+  [ ((myModMask, button3), mouseGesture myGestures)
+  , ((0, button2), const windowMenu)
+  ]
+
+myGestures = M.fromList 
+  [ ([U], float)
+  ]
+
+myScreenCorners = 
+  [ (SCLowerRight, nextWS)
+  , (SCLowerLeft,  prevWS)
+  --, (SCUpperRight, runOrRaiseMaster myLauncher (appName =? myLauncher))
   ]
 
 -- Hooks #############################################################################
@@ -175,24 +211,41 @@ myManageHook =
 -- does not work as expected
 myPlacement = inBounds $ underMouse (0,0)
 
-myLayoutHook = 
+myLayoutHook =
+  screenCornerLayoutHook $ 
   avoidStruts $
   avoidFloats $ 
-  smartBorders $ 
-  layoutHook def
+  smartBorders $
+  mouseResizableTile 
+    { draggerType = BordersDragger
+    , nmaster = nmaster
+    , masterFrac = ratio
+    , slaveFrac = ratio
+    , fracIncrement = ratioInc 
+    }
+  ||| tiled ||| Mirror tiled ||| Full
+  where
+    tiled    = Tall nmaster ratioInc ratio
+    nmaster  = 1
+    ratioInc = 3/100 
+    ratio    = 1/2
 
-myHandleEventHook = do
-  handleEventHook def
-  fullscreenEventHook
+myHandleEventHook =
+  composeAll
+    [ screenCornerEventHook
+    , fullscreenEventHook
+    ]
 
 myLogHook = setWallpaper
 
 myStartupHook = do
   startupHook desktopConfig
+  addScreenCorners myScreenCorners
   spawn myNetworkManager
   spawn myRedshift
-  --spawn myAudioControl
-  spawn "tint2"
+  spawn myAudioControl
+  spawn myBar
+  spawn myCloud
 
 -- Helper ###########################################################################
 
@@ -211,8 +264,34 @@ between a (b, c) = (b <= a) &| (a <= c)
       | b <= c = (&&)
       | otherwise = (||) 
 
-isNight :: TimeOfDay -> Bool
-isNight time = time `between` (mySunset, mySunrise) 
+isNight :: UTCTime -> Day -> LongitudeWest -> LatitudeNorth -> Bool
+isNight time day long lat = time `between`
+  ( sunset day long lat
+  , sunrise day long lat
+  ) 
+
+myWindowBringerTitler :: WindowSpace -> Window -> X String
+myWindowBringerTitler ws w = do
+  description <- show <$> getName w
+  return $ descriptionToLine description
+
+descriptionToLine :: String -> String
+descriptionToLine d = 
+  let (name, title) = splitInformation d
+      name' = fillWithSpaces myWindowBringerColumnSize name
+   in name' ++ title 
+
+splitInformation :: String -> (String, String)
+splitInformation d = mapTuple (T.unpack . T.reverse . T.strip . T.pack) $ span (/= '-') (reverse d)
+    
+fillWithSpaces len str
+  | ls < len = str ++ replicate (len -  ls) ' '
+  | otherwise = str 
+  where  
+    ls = length str 
+  
+mapTuple :: (a -> b) -> (a, a) -> (b, b)
+mapTuple f (a, b) = (f a, f b)
 
 myLog :: Show a => a -> IO ()
 myLog l = do
