@@ -22,7 +22,7 @@ import XMonad
   , XConfig
     ( modMask
     , workspaces, terminal, borderWidth, focusFollowsMouse
-    , handleEventHook, layoutHook, manageHook, startupHook
+    , handleEventHook, layoutHook, logHook, manageHook, startupHook
     )
   , Full(Full)
   )
@@ -35,6 +35,8 @@ import XMonad.Actions.SpawnOn
   ( manageSpawn
   , spawnOn
   )
+import XMonad.Actions.UpdatePointer
+  (updatePointer)
 import XMonad.Hooks.ScreenCorners
   ( addScreenCorners
   , screenCornerEventHook
@@ -70,9 +72,9 @@ myPASink       = "alsa_output.pci-0000_00_1b.0.analog-stereo"
 myVolumeSetter = "pactl set-sink-volume"
 myMuteSetter   = "pactl set-sink-mute"
 
-incVolume  = spawn $ unwords [myVolumeSetter, myPASink, "+2%"]
-decVolume  = spawn $ unwords [myVolumeSetter, myPASink, "-2%"]
-muteVolume = spawn $ unwords [myMuteSetter, myPASink, "toggle"] 
+incVolume  = spawn $ unwords [myVolumeSetter , myPASink , "+2%"]
+decVolume  = spawn $ unwords [myVolumeSetter , myPASink , "-2%"]
+muteVolume = spawn $ unwords [myMuteSetter   , myPASink , "toggle"] 
 
 -- Constants ########################################################################
 
@@ -97,6 +99,7 @@ main =
     , focusFollowsMouse = True
     , handleEventHook   = screenCornerEventHook
     , layoutHook        = myLayoutHook
+    , logHook           = centerCursor 
     , manageHook        = myManageHook
     , startupHook       = myStartupHook
     }
@@ -106,25 +109,25 @@ main =
 -- Controls #######################################################################
  
 myKeysP = 
-  [ ("M1-<Tab>", nextWS)
-  , ("M1-S-<Tab>", shiftToNext >> nextWS)
-  , ("M-<Tab>", prevWS)
-  , ("M-S-<Tab>", shiftToPrev >> prevWS)
-  , ("M-g", spawn appLauncher) 
-  , ("M-n", spawn "networkmanager_dmenu")
-  , ("M-p", spawn "passmenu")
+  [ ("M1-<Tab>"   , nextWS >> centerCursor)
+  , ("M-<Tab>"    , prevWS >> centerCursor)
+  , ("M1-S-<Tab>" , shiftToNext >> nextWS >> centerCursor)
+  , ("M-S-<Tab>"  , shiftToPrev >> prevWS >> centerCursor)
+  , ("M-g"        , spawn appLauncher) 
+  , ("M-n"        , spawn "networkmanager_dmenu")
+  , ("M-p"        , spawn "passmenu")
   ]
 
 myKeys = 
-  [ ((0, xF86XK_AudioLowerVolume) , decVolume)
-  , ((0, xF86XK_AudioRaiseVolume) , incVolume)
-  , ((0, xF86XK_AudioMute)        , muteVolume)
-  , ((0, xF86XK_AudioPrev)        , mpPrev)
-  , ((0, xF86XK_AudioNext)        , mpNext)
-  , ((0, xF86XK_AudioPlay)        , mpPlayPause)
-  , ((0, xF86XK_MonBrightnessDown), backlightDecCmd)
-  , ((0, xF86XK_MonBrightnessUp)  , backlightIncCmd)
-  , ((0, xF86XK_Search)           , spawn appLauncher)
+  [ ((0, xF86XK_AudioLowerVolume)  , decVolume)
+  , ((0, xF86XK_AudioRaiseVolume)  , incVolume)
+  , ((0, xF86XK_AudioMute)         , muteVolume)
+  , ((0, xF86XK_AudioPrev)         , mpPrev)
+  , ((0, xF86XK_AudioNext)         , mpNext)
+  , ((0, xF86XK_AudioPlay)         , mpPlayPause)
+  , ((0, xF86XK_MonBrightnessDown) , backlightDecCmd)
+  , ((0, xF86XK_MonBrightnessUp)   , backlightIncCmd)
+  , ((0, xF86XK_Search)            , spawn appLauncher)
   ]
 
 -- Hooks #############################################################################
@@ -134,12 +137,12 @@ myLayoutHook =
   noBorders $
   mouseResizableTile 
     { draggerType = FixedDragger 
-      { gapWidth = 10
+      { gapWidth     = 10
       , draggerWidth = 10
       }
-    , nmaster = 1
-    , masterFrac = 1/2
-    , slaveFrac = 1/2
+    , nmaster       = 1
+    , masterFrac    = 1/2
+    , slaveFrac     = 1/2
     , fracIncrement = 3/100 
     } ||| 
   Full 
@@ -151,9 +154,12 @@ myManageHook = composeAll
 
 myStartupHook = do 
   addScreenCorners 
-    [ (SCLowerRight, nextWS)
-    , (SCLowerLeft,  prevWS)
+    [ (SCLowerRight , nextWS)
+    , (SCLowerLeft  , prevWS)
     ]
   spawnOn "9" $ unwords [myTerminal, "-e", "htop"]
   spawn appLauncher
 
+-- Util 
+
+centerCursor = updatePointer (0.5, 0.5) (0, 0)
