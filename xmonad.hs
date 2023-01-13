@@ -1,5 +1,7 @@
 module Main where
 
+import Control.Concurrent
+  (threadDelay)
 import Graphics.X11.ExtraTypes.XF86
   ( xF86XK_AudioLowerVolume 
   , xF86XK_AudioRaiseVolume 
@@ -13,10 +15,11 @@ import Graphics.X11.ExtraTypes.XF86
   )
 
 import XMonad
-  ( doF
-  , (|||), (-->), (<||>), (=?)
+  ( X, liftIO
+  , (|||), (-->), (<||>), (=?), (.|.)
   , appName, composeAll, launch, spawn, xmonad
-  , mod4Mask 
+  , mod4Mask, shiftMask, button1 
+  , withFocused, hide
   , MonadReader(ask)
   , Default(def)
   , XConfig
@@ -29,14 +32,25 @@ import XMonad
 import XMonad.Actions.CycleWS
   ( nextWS, prevWS
   , shiftToNext, shiftToPrev
-  , Direction1D( Next, Prev)
+  , Direction1D(Next, Prev)
   )
 import XMonad.Actions.SpawnOn
-  ( manageSpawn
-  , spawnOn
-  )
+  (manageSpawn, spawnOn)
+import XMonad.Actions.TiledWindowDragging
+  (dragWindow)
 import XMonad.Actions.UpdatePointer
   (updatePointer)
+import XMonad.Actions.UpdateFocus
+  (focusUnderPointer)
+import XMonad.Actions.WindowBringer
+  ( gotoMenuConfig, bringMenuConfig
+  , WindowBringerConfig
+    ( menuCommand
+    , menuArgs
+    )
+  )
+import XMonad.Hooks.EwmhDesktops
+  (ewmh)
 import XMonad.Hooks.ScreenCorners
   ( addScreenCorners
   , screenCornerEventHook
@@ -46,8 +60,14 @@ import XMonad.Hooks.ScreenCorners
     , SCLowerRight
     )
   )
+import XMonad.Layout.Decoration
+  (shrinkText)
+import XMonad.Layout.DraggingVisualizer
+  (draggingVisualizer)
 import XMonad.Layout.NoBorders
   (smartBorders, noBorders)
+import XMonad.Layout.WindowSwitcherDecoration
+  (windowSwitcherDecoration)
 import XMonad.Layout.MouseResizableTile
   (mouseResizableTile
   , DraggerType
@@ -63,8 +83,14 @@ import XMonad.Layout.MouseResizableTile
     , fracIncrement
     )
   )
+import XMonad.Util.Cursor 
+  (setDefaultCursor, xC_left_ptr)
 import XMonad.Util.EZConfig
   (additionalKeys, additionalKeysP, additionalMouseBindings)
+import XMonad.Util.Hacks 
+  (javaHack)
+import XMonad.Util.SessionStart 
+  (doOnce, setSessionStarted)
 
 -- Volume #############################################################################
 
@@ -86,18 +112,27 @@ mpPrev          = spawn "playerctl previous"
 mpNext          = spawn "playerctl next"
 
 appLauncher     = "rofi -show drun"
+windowJumper    = "rofi -show window"
 myTerminal      = "alacritty"
+
+myWindowBringerConfig = def
+  { menuCommand = "rofi"
+  , menuArgs = ["-dmenu"]
+  }
 
 -- main ###########################################################################
 
 main = 
-  xmonad $ def
+  xmonad $ 
+  ewmh $
+  javaHack $
+  def
     { modMask           = mod4Mask
     , workspaces        = map show [1..9]
     , terminal          = myTerminal
     , borderWidth       = 0
     , focusFollowsMouse = True
-    , handleEventHook   = screenCornerEventHook
+    , handleEventHook   = myEventHook
     , layoutHook        = myLayoutHook
     , logHook           = centerCursor 
     , manageHook        = myManageHook
@@ -105,17 +140,21 @@ main =
     }
     `additionalKeysP` myKeysP 
     `additionalKeys`  myKeys
+    `additionalMouseBindings` myMouseBindings
  
 -- Controls #######################################################################
  
 myKeysP = 
-  [ ("M1-<Tab>"   , nextWS >> centerCursor)
-  , ("M-<Tab>"    , prevWS >> centerCursor)
-  , ("M1-S-<Tab>" , shiftToNext >> nextWS >> centerCursor)
-  , ("M-S-<Tab>"  , shiftToPrev >> prevWS >> centerCursor)
+  [ ("M1-<Tab>"   , nextWS >> waitAndFocus)
+  , ("M-<Tab>"    , prevWS >> waitAndFocus)
+  , ("M1-S-<Tab>" , shiftToNext >> nextWS >> waitAndFocus)
+  , ("M-S-<Tab>"  , shiftToPrev >> prevWS >> waitAndFocus)
+  , ("M-f"        , gotoMenuConfig myWindowBringerConfig)
+  , ("M-v"        , bringMenuConfig myWindowBringerConfig)
   , ("M-g"        , spawn appLauncher) 
   , ("M-n"        , spawn "networkmanager_dmenu")
   , ("M-p"        , spawn "passmenu")
+  , ("M-z"        , withFocused hide)
   ]
 
 myKeys = 
@@ -130,9 +169,14 @@ myKeys =
   , ((0, xF86XK_Search)            , spawn appLauncher)
   ]
 
+myMouseBindings =
+  [ ((mod4Mask .|. shiftMask, button1), dragWindow)
+  ]
+
 -- Hooks #############################################################################
 
 myLayoutHook =
+  draggingVisualizer $
   screenCornerLayoutHook $ 
   noBorders $
   mouseResizableTile 
@@ -152,14 +196,25 @@ myManageHook = composeAll
   , manageHook def
   ]
 
-myStartupHook = do 
-  addScreenCorners 
-    [ (SCLowerRight , nextWS)
-    , (SCLowerLeft  , prevWS)
+myEventHook = screenCornerEventHook
+
+myStartupHook :: X ()
+myStartupHook = 
+  composeAll
+    [ addScreenCorners 
+        [ (SCLowerRight , nextWS)
+        , (SCLowerLeft  , prevWS)
+        ]
+    , setDefaultCursor xC_left_ptr
+    , doOnce $ composeAll
+        [ setSessionStarted
+        , spawnOn "9" $ unwords [myTerminal, "-e", "htop"]
+        , spawn appLauncher
+        ]
     ]
-  spawnOn "9" $ unwords [myTerminal, "-e", "htop"]
-  spawn appLauncher
 
 -- Util 
 
 centerCursor = updatePointer (0.5, 0.5) (0, 0)
+
+waitAndFocus = liftIO (threadDelay 5) >> focusUnderPointer
